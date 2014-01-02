@@ -1,0 +1,43 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+\usepackage{pdfpages}
+\usepackage{listings}
+\usepackage{graphicx}
+\usepackage{fullpage}
+
+\newcommand{\sectionbreak}{\clearpage}
+\renewcommand\contentsname{Inhaltsverzeichnis}
+\renewcommand{\figurename}{Abbildung}
+
+\begin{document}
+\lstset{language=C}
+\pagenumbering{roman}
+\includepdf{titlepage.pdf}
+
+\clearpage
+\setcounter{page}{1}
+\tableofcontents
+
+\section{Dummysection}
+\pagenumbering{arabic}
+\setcounter{page}{1}
+Dummytext
+\begin{lstlisting}[frame=single]
+int main() {
+        // dummycode
+        return 0;
+        }
+\end{lstlisting}
+\subsection{Dummysubsection}
+Dummyfigure \ref{hfu} auf Seite \pageref{hfu}.
+
+\begin{figure}[h!]
+  \caption{dummycaption}
+  \label{hfu}
+  \centering
+    \includegraphics[scale=1]{hfu.png}
+\end{figure}
+
+\end{document}
