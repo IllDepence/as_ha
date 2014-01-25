@@ -42,6 +42,22 @@ Dummyfigure \ref{hfu} auf Seite \pageref{hfu}.
     \includegraphics[scale=1]{hfu.png}
 \end{figure}
 
+% - - - - - - - - - - - - - serious time
+
+\section{Einleitung}
+CVE-2010-3301, Wiedereinführung von CVE-2007-4573 \cite{CVE0}
+\section{Grundlagen}
+\subsection{ptrace}
+breakpoint debugging (gdb), system call tracing, beispielcalls + erklärung \cite{DIE0}
+\subsection{ia32 syscall emulation}
+int0x80, sysenter \cite{WIK0}\cite{JES0}
+\section{Exploit}
+\subsection{Kernelcode}
+Implicit zero extension\\
+''Results of 32-bit operations are implicitly zero extended to 64-bit values. This differs from 16 and 8 bit operations, that don't affect the upper part of registers. This can be used for code size optimisations in some cases [...]'' \cite{X860}
+\subsection{Exploit-Vorgang}
+''On x86\_64, the entire kernel is mapped into the last 2 GB of address space). Since the kernel and user programs run in the same address space, this means that, with an appropriate choice of \%rax, the kernel will dereference an address in the user address space to find out the address of the function it should jump to in order to handle the system call.'' \cite{ELH0}
+
 \nocite{*}
 \printbibliography
 \addcontentsline{toc}{section}{Literatur}
