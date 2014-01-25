@@ -14,7 +14,16 @@
 \newcommand{\sectionbreak}{\clearpage}
 
 \begin{document}
-\lstset{language=C}
+\lstdefinelanguage
+   [x64]{Assembler}     % add a "x64" dialect of Assembler
+   [x86masm]{Assembler} % based on the "x86masm" dialect
+   % with these extra keywords:
+   {morekeywords={CDQE,CQO,CMPSQ,CMPXCHG16B,JRCXZ,LODSQ,MOVSXD, %
+                  POPFQ,PUSHFQ,SCASQ,STOSQ,IRETQ,RDTSCP,SWAPGS, %
+                  rax,rdx,rcx,rbx,rsi,rdi,rsp,rbp, %
+                  r8,r8d,r8w,r8b,r9,r9d,r9w,r9b,testl,cmpl,movl}} % etc.
+
+\lstset{language=[x64]Assembler}
 \pagenumbering{roman}
 \includepdf{titlepage.pdf}
 
@@ -22,29 +31,9 @@
 \setcounter{page}{1}
 \tableofcontents
 
-\section{Dummysection}
+\section{Einleitung}
 \pagenumbering{arabic}
 \setcounter{page}{1}
-Dummytext \cite{DIE0}
-\begin{lstlisting}[frame=single]
-int main() {
-        // dummycode
-        return 0;
-        }
-\end{lstlisting}
-\subsection{Dummysubsection}
-Dummyfigure \ref{hfu} auf Seite \pageref{hfu}.
-
-\begin{figure}[h!]
-  \caption{dummycaption}
-  \label{hfu}
-  \centering
-    \includegraphics[scale=1]{hfu.png}
-\end{figure}
-
-% - - - - - - - - - - - - - serious time
-
-\section{Einleitung}
 Bei der Vulnerability CVE-2010-3301 handelt es sich um eine Local Privilege Escalation Vulnerability für den Linux-Kernel vor Version 2.6.36-rc4-git2 auf 64 Bit-Systemen. Außerdem ist es eine Wiedereinführung der Vulnerability CVE-2007-4573 \cite{CVE0}. Kern der Schwachstelle ist die Nicht-Überprüfung der höherwertigen 32 Bit eines 64 Bit-Registers, die es ermöglicht, den Kernel dazu zu bringen, Code außerhalb der System Call Table auszuführen.
 \section{Grundlagen}
 \subsection{ptrace}
@@ -60,7 +49,8 @@ Anwendung findet ptrace unter Anderem beim Breakpoint Debugging, was z.B. mit gd
 \end{itemize}{\cite{DIE0}
 \subsection{ia32 syscall emulation}
 Es gibt verschiedene Wege, System-Calls auf x86-Prozessoren unter Linux durchzuführen. Vor Kernel-Version 2.5 wurde ein Software Interrupt (int 0x80) verwendet \cite{GAR0}. Hierbei wird die System-Call-Nummer im Register eax abgelegt und darauf die Instruktion \texttt{int 0x80} aufgerufen. Nachfolger dieser Vorgehensweise sind die Instruktionen SYSENTER und SYSEXIT, welche aufgrund von Performance-Gründen eingeführt wurden. \cite{JES0}\cite{WIK0}\\
-Um auf Systemen, die SYSENTER/SYSEXIT bereits unterstützen, weiterhn int 0x80 System-Calls zu ermöglichen, gibt es die sogenannte ia32 syscall emulation, welche im Linux-Kernel in der Datei arch/x86/ia32/ia32entry.S realisiert wird. Die für CVE-2010-3301 relevanten Code-Stellen werden im folgenden Kapitel \emph{Kernelcode} genauer betrachtet.
+Um auf Systemen, die SYSENTER und SYSEXIT bereits unterstützen, weiterhin int 0x80 System-Calls zu ermöglichen, gibt es die sogenannte ''ia32 syscall emulation'', welche im Linux-Kernel in der Datei arch/x86/ia32\\
+/ia32entry.S realisiert wird. Die für CVE-2010-3301 relevanten Code-Stellen werden im folgenden Kapitel \emph{Kernelcode} genauer betrachtet.
 \section{Exploit}
 \subsection{Kernelcode}
 Da ptrace, wie im Abschnitt \emph{Grundlagen} erwähnt, für System Call Tacing verwendet wird, findet sich bei der Emulation von int 0x80 System-Calls Code, welcher die Verwendung von ptrace realisiert:\\
@@ -103,11 +93,11 @@ In \texttt{ia32\_tracesys} werden nun folgende, für die Schwachstelle ausschlag
 \begin{itemize}
 \item 444: Da das Tracing von System-Calls aktiv ist, wird dem Tracer die Kontrolle übergeben. Dieser kann nun Register lesen sowie verändern und übergibt danach die Kontrolle wieder an den Tracee.
 \item 445: Das Makro \texttt{LOAD\_ARGS32} wird aufgerufen. (siehe unten)
-\item 447+448: Es wird überprüft, ob der Wert von eax kleiner oder gleich der Anzahl von System-Calls ist.
+\item 447+448: Es wird sichergestellt, dass der Wert von eax kleiner oder gleich der Anzahl von System-Calls ist.
 \item 449: Sprung zu \texttt{ia32\_do\_call}. (siehe unten)
 \end{itemize}
 Zu beachten ist hier, dass bei der Überprüfung der System-Call-Nummer das 32 Bit-Register eax und nicht das entsprechende 64 Bit-Register rax überprüft wird.\\
-Das Makro \texttt{LOAD\_ARGS32} macht folgendes:\\
+Das Makro \texttt{LOAD\_ARGS32} sieht wie folgt aus:\\
 \\
 \textbf{arch/x86/ia32/ia32entry.S} (3)
 \begin{lstlisting}[frame=single]
@@ -141,9 +131,24 @@ Eine Schwachstelle ergibt sich foglich durch den Ablauf:
 \item Bei der Überprüfung der Validität der System-Call-Nummer wird eax (nicht rax) verwendet.
 \item Beim schlussendlichen Call in die System Call Table wird rax verwendet.
 \end{enumerate}
-Dem Tracer ist es also möglich, die oberen 32 Bit von rax nach belieben zu setzen.
+Dem Tracer ist es also möglich, die oberen 32 Bit von rax nach Belieben zu verändern, wodruch beim Call in die System Call Table ein unvorhergesehener Wert verwendet wird.
 \subsection{Exploit-Vorgang}
+Ein Exploit für CVE-2010-3301 durchläuft folgende Schritte:
+\begin{enumerate}
+\item Der Prozess ruft \texttt{fork()} auf.
+\item Der child-Prozess verwendet die ptrace-Funktion PTRACE\_""TRACEME, lässt sich also vom parent-Prozess tracen.
+\item Der parent-Prozess bewirkt durch die Verwendung von PTRACE\_""SYSCALL, dass er über System-Calls des child-Prozesses ''informiert'' wird und tritt darauf in eine Schleife ein, in welcher er pro Durchlauf auf Meldung seines Tracees (child-Prozess) wartet und darauf mithilfe von PTRACE\_PEEKUSER überprüft, ob der Wert des Registers rax gleich 0x101 ist.
+\item Der child-Prozess erstellt eine Funktion \texttt{kernelmodecode}, welche, wenn von Kernel ausgeführt, dem Prozess root-Rechte gibt. Hierzu werden die ''kernel symbols'' \texttt{commit\_creds} und \texttt{prepare\_kernel\_cred} verwendet. \cite{ZHA0}\\
+Weiterhin erstellt der child-Prozess ein sehr großes, anonymes Memory-Mapping, füllt dieses mit der Adresse von \texttt{kernelmodecode} und führt einen System-Call mit Nummer 0x101 durch.
+\item Der Kernel ''informiert'' den parent-Prozess über den System-Call. Dieser prüft das Register rax auf den Wert 0x101 und setzt es auf 0x800000101, sodass der Wert von eax weiterhin 0x101 bleibt.
+\item Der Kernel versäumt es, die Manipulation zu bemerken und führt den Call in die System-Call-Table mit dem veränderten Wert von rax durch. Der Kernel landet in dem mit der Adresse von \texttt{kernelmodecode} beschriebenen Memory-Mapping und gewährt dem child-Prozess damit root-Rechte.\\
+Anzumerken ist, dass dies möglich ist, da Kernel und User-Programme sich im gleichen Adressraum befinden:\\
+\begin{quote}
 ''On x86\_64, the entire kernel is mapped into the last 2 GB of address space). Since the kernel and user programs run in the same address space, this means that, with an appropriate choice of \%rax, the kernel will dereference an address in the user address space to find out the address of the function it should jump to in order to handle the system call.'' \cite{ELH0}
+\end{quote}
+\item Der child-Prozess öffnet eine Shell.
+\end{enumerate}
+Auf diese Weise erhält ein beliebiger User, der eine Binary mit dem Exploit ausführt, root-Rechte. \cite{DAM0}\cite{XOR0}
 
 \nocite{*}
 \printbibliography
