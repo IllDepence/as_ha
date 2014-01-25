@@ -5,7 +5,7 @@
 \usepackage{pdfpages}
 \usepackage{listings}
 \usepackage{graphicx}
-\usepackage{fullpage}
+%\usepackage{fullpage}
 \usepackage{biblatex}
 \usepackage[german]{babel}
 \usepackage[nottoc,numbib]{tocbibind}
@@ -45,16 +45,103 @@ Dummyfigure \ref{hfu} auf Seite \pageref{hfu}.
 % - - - - - - - - - - - - - serious time
 
 \section{Einleitung}
-CVE-2010-3301, Wiedereinführung von CVE-2007-4573 \cite{CVE0}
+Bei der Vulnerability CVE-2010-3301 handelt es sich um eine Local Privilege Escalation Vulnerability für den Linux-Kernel vor Version 2.6.36-rc4-git2 auf 64 Bit-Systemen. Außerdem ist es eine Wiedereinführung der Vulnerability CVE-2007-4573 \cite{CVE0}. Kern der Schwachstelle ist die Nicht-Überprüfung der höherwertigen 32 Bit eines 64 Bit-Registers, die es ermöglicht, den Kernel dazu zu bringen, Code außerhalb der System Call Table auszuführen.
 \section{Grundlagen}
 \subsection{ptrace}
-breakpoint debugging (gdb), system call tracing, beispielcalls + erklärung \cite{DIE0}
+ptrace (kurz für: process trace) ist eine auf vielen Unix und Unix-ähnlichen Betriebssystemen vorhandene Funktionalität, die es einem parent-Prozess (Tracer) erlaubt, den Ablauf eines child-Prozesses (Tracee) zu beobachten und kontrollieren. Konkreter ausgedrückt kann ein Tracer Memory sowie Register eines ihm zugehörigen Tracees auslesen sowie ändern.\\
+Anwendung findet ptrace unter Anderem beim Breakpoint Debugging, was z.B. mit gdb durchgeführt werden kann, und System Call Tracing. Letzterer Anwendungsbereich ist für CVE-2010-3301 relevant.\\
+\\
+\textbf{Beispiele von ptrace-Funktionen:}\\
+\begin{itemize}
+\item PTRACE\_TRACEME: Tracee signalisiert, dass er getraced werden will
+\item PTRACE\_PEEKUSER: Tracer liest Register von Tracee
+\item PTRACE\_POKEUSER: Tracer beschreibt Register von Tracee
+\item PTRACE\_SYSCALL: Tracer legt fest, dass Tracee im Falle dass dieser einen System-Call durchführt, gestoppt und die Kontrolle an ihn (Tracer) abgegeben wird
+\end{itemize}{\cite{DIE0}
 \subsection{ia32 syscall emulation}
-int0x80, sysenter \cite{WIK0}\cite{JES0}
+Es gibt verschiedene Wege, System-Calls auf x86-Prozessoren unter Linux durchzuführen. Vor Kernel-Version 2.5 wurde ein Software Interrupt (int 0x80) verwendet \cite{GAR0}. Hierbei wird die System-Call-Nummer im Register eax abgelegt und darauf die Instruktion \texttt{int 0x80} aufgerufen. Nachfolger dieser Vorgehensweise sind die Instruktionen SYSENTER und SYSEXIT, welche aufgrund von Performance-Gründen eingeführt wurden. \cite{JES0}\cite{WIK0}\\
+Um auf Systemen, die SYSENTER/SYSEXIT bereits unterstützen, weiterhn int 0x80 System-Calls zu ermöglichen, gibt es die sogenannte ia32 syscall emulation, welche im Linux-Kernel in der Datei arch/x86/ia32/ia32entry.S realisiert wird. Die für CVE-2010-3301 relevanten Code-Stellen werden im folgenden Kapitel \emph{Kernelcode} genauer betrachtet.
 \section{Exploit}
 \subsection{Kernelcode}
-Implicit zero extension\\
+Da ptrace, wie im Abschnitt \emph{Grundlagen} erwähnt, für System Call Tacing verwendet wird, findet sich bei der Emulation von int 0x80 System-Calls Code, welcher die Verwendung von ptrace realisiert:\\
+\\
+\textbf{arch/x86/ia32/ia32entry.S} (1)
+\begin{lstlisting}[frame=single]
+401 ENTRY(ia32_syscall)
+[...]
+426 testl $_TIF_WORK_SYSCALL_ENTRY,TI_flags(%r10)
+427 jnz ia32_tracesys
+\end{lstlisting}
+In Zeile 426 wird geprüft, ob das Tracing von System-Calls aktiv ist.\\
+\texttt{\$\_TIF\_WORK\_SYSCALL\_ENTRY} wird definiert in:\\
+\\
+\textbf{arch/x86/include/asm/thread\_info.h}
+\begin{lstlisting}[frame=single]
+    /* syscall trace active */
+76  #define TIF_SYSCALL_TRACE       0
+    [...]
+123 /* work to do in syscall_trace_enter() */
+124 #define _TIF_WORK_SYSCALL_ENTRY \
+125         (_TIF_SYSCALL_TRACE [...] |   \
+126          _TIF_SECCOMP [...] |     \
+127          _TIF_NOHZ)
+\end{lstlisting}
+Ist ein System Call Tacing aktiv, so wird zu \texttt{ia32\_tracesys} gesprungen:\\
+\\
+\textbf{arch/x86/ia32/ia32entry.S} (2)
+\begin{lstlisting}[frame=single]
+439 ia32_tracesys:
+[...]
+444 call syscall_trace_enter
+445 LOAD_ARGS32 ARGOFFSET /* reload args [...] */
+[...]
+447 cmpl $(IA32_NR_syscalls-1),%eax
+448 ja  int_ret_from_sys_call
+449 jmp ia32_do_call
+\end{lstlisting}
+In \texttt{ia32\_tracesys} werden nun folgende, für die Schwachstelle ausschlaggebenden Schritte durchlaufen.
+\begin{itemize}
+\item 444: Da das Tracing von System-Calls aktiv ist, wird dem Tracer die Kontrolle übergeben. Dieser kann nun Register lesen sowie verändern und übergibt danach die Kontrolle wieder an den Tracee.
+\item 445: Das Makro \texttt{LOAD\_ARGS32} wird aufgerufen. (siehe unten)
+\item 447+448: Es wird überprüft, ob der Wert von eax kleiner oder gleich der Anzahl von System-Calls ist.
+\item 449: Sprung zu \texttt{ia32\_do\_call}. (siehe unten)
+\end{itemize}
+Zu beachten ist hier, dass bei der Überprüfung der System-Call-Nummer das 32 Bit-Register eax und nicht das entsprechende 64 Bit-Register rax überprüft wird.\\
+Das Makro \texttt{LOAD\_ARGS32} macht folgendes:\\
+\\
+\textbf{arch/x86/ia32/ia32entry.S} (3)
+\begin{lstlisting}[frame=single]
+55 .macro LOAD_ARGS32
+[...]
+59 movl \offset+40(%rsp),%ecx
+60 movl \offset+48(%rsp),%edx
+61 movl \offset+56(%rsp),%esi
+62 movl \offset+64(%rsp),%edi
+63 .endm
+\end{lstlisting}
+Zweck des Makros ist es, nach eventuellen Veränderungen durch den Tracer die ursprünglichen Register-Werte wiederherzustellen. Hierbei ist zu bemerken, dass nur die Register ecx, edx, esi und edi wiederhergestellt werden, eax bzw. rax aber nicht.\\
+Zusätzlich ist anzumerken, dass die \texttt{movl}-Anweisungen angewandt auf 32 Bit-Register die oberen 32 Bit der entsprechenden 64 Bit-Register automatisch mit Nullen fühlen. Dieses Verhalten nennt sich ''Implicit zero extension'' und kann für Code-Optimierungs-Zwecke genutzt werden:
+\begin{quote}
 ''Results of 32-bit operations are implicitly zero extended to 64-bit values. This differs from 16 and 8 bit operations, that don't affect the upper part of registers. This can be used for code size optimisations in some cases [...]'' \cite{X860}
+\end{quote}
+Zuletzt betrachten wir \texttt{ia32\_do\_call}:\\
+\\
+\textbf{arch/x86/ia32/ia32entry.S} (4)
+\begin{lstlisting}[frame=single]
+430 ia32_do_call:
+[...]
+432 call *ia32_sys_call_table(,%rax,8)
+\end{lstlisting}
+Für den letztendlichen Call in die System Call Table wird nun das 64 Bit-Register rax statt dem entsprechenden 32 Bit-Register eax verwendet.\\
+\\
+Eine Schwachstelle ergibt sich foglich durch den Ablauf:
+\begin{enumerate}
+\item Dem Tracer wird die Möglichkeit gegeben, die Register des Tracees zu verändern.
+\item Erhält der Tracee wieder die Kontrolle, werden diverse Registerwerte, nicht aber der von eax bzw. rax wiederhergestellt.
+\item Bei der Überprüfung der Validität der System-Call-Nummer wird eax (nicht rax) verwendet.
+\item Beim schlussendlichen Call in die System Call Table wird rax verwendet.
+\end{enumerate}
+Dem Tracer ist es also möglich, die oberen 32 Bit von rax nach belieben zu setzen.
 \subsection{Exploit-Vorgang}
 ''On x86\_64, the entire kernel is mapped into the last 2 GB of address space). Since the kernel and user programs run in the same address space, this means that, with an appropriate choice of \%rax, the kernel will dereference an address in the user address space to find out the address of the function it should jump to in order to handle the system call.'' \cite{ELH0}
 
