@@ -6,10 +6,12 @@
 \usepackage{listings}
 \usepackage{graphicx}
 \usepackage{fullpage}
+\usepackage{biblatex}
+\usepackage[german]{babel}
+\usepackage[nottoc,numbib]{tocbibind}
+\bibliography{ref.bib}
 
 \newcommand{\sectionbreak}{\clearpage}
-\renewcommand\contentsname{Inhaltsverzeichnis}
-\renewcommand{\figurename}{Abbildung}
 
 \begin{document}
 \lstset{language=C}
@@ -23,7 +25,7 @@
 \section{Dummysection}
 \pagenumbering{arabic}
 \setcounter{page}{1}
-Dummytext
+Dummytext \cite{DIE0}
 \begin{lstlisting}[frame=single]
 int main() {
         // dummycode
@@ -39,5 +41,9 @@ Dummyfigure \ref{hfu} auf Seite \pageref{hfu}.
   \centering
     \includegraphics[scale=1]{hfu.png}
 \end{figure}
+
+\nocite{*}
+\printbibliography
+\addcontentsline{toc}{section}{Literatur}
 
 \end{document}
